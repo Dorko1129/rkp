@@ -1,39 +1,213 @@
+enum eVertexArrayObject {
+	VAOVerticesData,
+	VAOCount
+};
+enum eBufferObject {
+	VBOVerticesData,
+	BOCount
+};
+enum eProgram {
+	QuadScreenProgram,
+	ProgramCount
+};
+enum eTexture {
+	NoTexture,		// fixes 0 sized array problem
+	TextureCount
+};
+
+#include <common.cpp>
+
+GLchar				windowTitle[] = "Drag-and-Drop";
+GLfloat				aspectRatio;
+/* -1 jelentése, hogy nem vonszolunk semmit. -2 jelentése, hogy mindent (Ctrl). */
+/* -1 means we are not dragging. */
+GLint				dragged = -1;
+vec2				prevMousePos; // Új változó a 3. feladathoz (delta számítás)
+
+/* Vektor a szakasz végpontjainak tárolásához. */
+/* Vector for storing end points of a line. */
+static vector<vec2>	verticesData = {
+	vec2(-0.5f, -0.5f),
+	vec2( 0.5f,  0.5f),
+};
+
+void initShaderProgram() {
+	ShaderInfo shader_info[ProgramCount][3] = { {
+		{ GL_VERTEX_SHADER,		"./vertexShader.glsl" },
+		{ GL_FRAGMENT_SHADER,	"./fragmentShader.glsl" },
+		{ GL_NONE, nullptr } } };
+
+	for (int programItem = 0; programItem < ProgramCount; programItem++) {
+		program[programItem] = LoadShaders(shader_info[programItem]);
+		locationMatModel = glGetUniformLocation(program[programItem], "matModel");
+		locationMatView = glGetUniformLocation(program[programItem], "matView");
+		locationMatProjection = glGetUniformLocation(program[programItem], "matProjection");
+	}
+	glBindVertexArray(VAO[VAOVerticesData]);
+	glBindBuffer(GL_ARRAY_BUFFER, BO[VBOVerticesData]);
+	glBufferData(GL_ARRAY_BUFFER, verticesData.size() * sizeof(vec2), verticesData.data(), GL_STATIC_DRAW);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(vec2), 0);
+	glUseProgram(program[QuadScreenProgram]);
+	
+	matModel = mat4(1.0);
+	matView = lookAt(
+		vec3(0.0f, 0.0f, 9.0f),
+		vec3(0.0f, 0.0f, 0.0f),
+		vec3(0.0f, 1.0f, 0.0f));
+	glUniformMatrix4fv(locationMatModel, 1, GL_FALSE, value_ptr(matModel));
+	glUniformMatrix4fv(locationMatView, 1, GL_FALSE, value_ptr(matView));
+	glUniformMatrix4fv(locationMatProjection, 1, GL_FALSE, value_ptr(matProjection));
+}
+
+GLfloat distanceSquare(vec2 p1, vec2 p2) {
+	vec2 delta = p1 - p2;
+	return dot(delta, delta);
+}
+
+GLint getActivePoint(vector<vec2> p, GLfloat sensitivity, vec2 mousePosition) {
+	GLfloat sensitivitySquare = sensitivity * sensitivity;
+	for (GLint i = 0; i < p.size(); i++)
+		if (distanceSquare(p[i], mousePosition) < sensitivitySquare)
+			return i;
+	return -1;
+}
+
+void display(GLFWwindow* window, double currentTime) {
+	glClear(GL_COLOR_BUFFER_BIT);
+	glDrawArrays(GL_LINES, 0, verticesData.size());
+	glDrawArrays(GL_POINTS, 0, verticesData.size());
+}
+
+void framebufferSizeCallback(GLFWwindow* window, int width, int height) {
+	windowWidth = glm::max(width, 1);
+	windowHeight = glm::max(height, 1);
+	aspectRatio = (float)windowWidth / (float)windowHeight;
+	
+	glViewport(0, 0, windowWidth, windowHeight);
+	
+	if (projectionType == Orthographic)
+		if (windowWidth < windowHeight)
+			matProjection = ortho(-worldSize, worldSize, -worldSize / aspectRatio, worldSize / aspectRatio, -100.0, 100.0);
+		else
+			matProjection = ortho(-worldSize * aspectRatio, worldSize * aspectRatio, -worldSize, worldSize, -100.0, 100.0);
+	else
+		matProjection = perspective(radians(45.0f), aspectRatio, 0.1f, 100.0f);
+		
+	glUniformMatrix4fv(locationMatProjection, 1, GL_FALSE, value_ptr(matProjection));
+}
+
+void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+	if ((action == GLFW_PRESS) && (key == GLFW_KEY_ESCAPE)) glfwSetWindowShouldClose(window, GLFW_TRUE);
+	
+	if (action == GLFW_PRESS)
+		keyboard[key] = GL_TRUE;
+	else if (action == GLFW_RELEASE)
+		keyboard[key] = GL_FALSE;
+		
+	if (key == GLFW_KEY_O && action == GLFW_PRESS) {
+		projectionType = Orthographic;
+		framebufferSizeCallback(window, windowWidth, windowHeight);
+	}
+	if (key == GLFW_KEY_P && action == GLFW_PRESS) {
+		projectionType = Perspective;
+		framebufferSizeCallback(window, windowWidth, windowHeight);
+	}
+}
+
+// ÚJ SEGÉDFÜGGVÉNY: Képernyő koordináták világkoordinátává alakítása (2. feladathoz)
 vec2 getScreenToWorld(double xPos, double yPos) {
-	// Képernyő (pixel) koordináták átváltása Normalizált Képernyő Koordinátákba (NDC: [-1, 1])
 	float ndcX = (2.0f * xPos) / windowWidth - 1.0f;
 	float ndcY = 1.0f - (2.0f * yPos) / windowHeight;
 
-	// Projektív és Nézeti mátrixok inverze
 	mat4 invVP = inverse(matProjection * matView);
-	
-	// A közeli és távoli vágósíkon lévő pontok meghatározása a sugárhoz
 	vec4 nearPoint = invVP * vec4(ndcX, ndcY, -1.0f, 1.0f);
 	nearPoint /= nearPoint.w;
 	
 	vec4 farPoint = invVP * vec4(ndcX, ndcY, 1.0f, 1.0f);
 	farPoint /= farPoint.w;
 
-	// Sugárvektor iránya
 	vec3 dir = vec3(farPoint - nearPoint);
 	
-	// Keresünk egy metszéspontot a Z = 0 síkkal (mivel a vonalunk a Z=0 síkon fekszik)
 	if (abs(dir.z) > 0.0001f) {
 		float t = -nearPoint.z / dir.z;
 		vec3 worldPos = vec3(nearPoint) + t * dir;
 		return vec2(worldPos.x, worldPos.y);
 	}
-	
 	return vec2(nearPoint.x, nearPoint.y);
 }
 
-	for (int programItem = 0; programItem < ProgramCount; programItem++) {
-		program[programItem] = LoadShaders(shader_info[programItem]);
-		/** Shader változó location lekérdezése. */
-		/** Getting shader variable location. */
-		locationMatModel = glGetUniformLocation(program[programItem], "matModel");
-		locationMatView = glGetUniformLocation(program[programItem], "matView");
-		locationMatProjection = glGetUniformLocation(program[programItem], "matProjection");
+void cursorPosCallback(GLFWwindow* window, double xPos, double yPos) {
+	if (dragged >= 0 || dragged == -2) {
+		vec2 mousePosition = getScreenToWorld(xPos, yPos);
+		
+		if (dragged == -2) {
+			// 3. Feladat: Ctrl lenyomva -> Összes pont mozgatása egyszerre
+			vec2 delta = mousePosition - prevMousePos;
+			for (int i = 0; i < verticesData.size(); i++) {
+				verticesData[i] += delta;
+			}
+		} else {
+			// 2. Feladat: Vonszolás perspektívában is
+			verticesData[dragged] = mousePosition;
+		}
+		
+		prevMousePos = mousePosition;
+		
+		glBindBuffer(GL_ARRAY_BUFFER, BO[VBOVerticesData]);
+		glBufferData(GL_ARRAY_BUFFER, verticesData.size() * sizeof(vec2), verticesData.data(), GL_STATIC_DRAW);
 	}
+}
+
+void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
+	if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
+		double xPos, yPos;
+		glfwGetCursorPos(window, &xPos, &yPos);
+		
+		vec2 mousePosition = getScreenToWorld(xPos, yPos);
+		prevMousePos = mousePosition;
+		
+		// 3. Feladat: Lenyomva tartja a Ctrl gombot?
+		bool isCtrlPressed = (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS || 
+		                      glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS);
+		
+		if (isCtrlPressed) {
+			dragged = -2; // Speciális állapot az összes pont mozgatásához
+		} else {
+			// 0.5f érzékenység a stabilabb fogásért a perspektívában
+			dragged = getActivePoint(verticesData, 0.5f, mousePosition);
+		}
+	}
+	
+	if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE)
+		dragged = -1;
+}
+
+int main(void) {
+	init(3, 3, GLFW_OPENGL_COMPAT_PROFILE);
+	initShaderProgram();
+	framebufferSizeCallback(window, windowWidth, windowHeight);
+	setlocale(LC_ALL, "");
+	
+	cout << "Drag-and-Drop using mouse" << endl << endl;
+	cout << "Keyboard control" << endl;
+	cout << "ESC\t\texit" << endl;
+	cout << "O\t\tinduces orthographic projection" << endl;
+	cout << "P\t\tinduces perspective projection" << endl << endl;
+	cout << "Weekly tasks" << endl;
+	cout << "Gyakorlat 1: Színezzük kékre a vonalat!" << endl;
+	cout << "Gyakorlat 2: Tegyük működőképessé perspektíva mellett is a vonszolást!" << endl;
+	cout << "Gyakorlat 3: Ctrl gomb lenyomására az összes pontot mozgassuk!" << endl;
+	
+	while (!glfwWindowShouldClose(window)) {
+		display(window, glfwGetTime());
+		glfwSwapBuffers(window);
+		glfwPollEvents();
+	}
+	
+	cleanUpScene(EXIT_SUCCESS);
+	return EXIT_SUCCESS;
+}
 	/** Csatoljuk a vertex array objektumunkat a paraméterhez. */
 	/** glBindVertexArray binds the vertex array object to the parameter. */
 	glBindVertexArray(VAO[VAOVerticesData]);
