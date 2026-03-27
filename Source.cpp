@@ -1,39 +1,30 @@
-﻿enum eVertexArrayObject {
-	VAOVerticesData,
-	VAOCount
-};
-enum eBufferObject {
-	VBOVerticesData,
-	BOCount
-};
-enum eProgram {
-	QuadScreenProgram,
-	ProgramCount
-};
-enum eTexture {
-	NoTexture,		// fixes 0 sized array problem
-	TextureCount
-};
+vec2 getScreenToWorld(double xPos, double yPos) {
+	// Képernyő (pixel) koordináták átváltása Normalizált Képernyő Koordinátákba (NDC: [-1, 1])
+	float ndcX = (2.0f * xPos) / windowWidth - 1.0f;
+	float ndcY = 1.0f - (2.0f * yPos) / windowHeight;
 
-#include <common.cpp>
+	// Projektív és Nézeti mátrixok inverze
+	mat4 invVP = inverse(matProjection * matView);
+	
+	// A közeli és távoli vágósíkon lévő pontok meghatározása a sugárhoz
+	vec4 nearPoint = invVP * vec4(ndcX, ndcY, -1.0f, 1.0f);
+	nearPoint /= nearPoint.w;
+	
+	vec4 farPoint = invVP * vec4(ndcX, ndcY, 1.0f, 1.0f);
+	farPoint /= farPoint.w;
 
-GLchar				windowTitle[] = "Drag-and-Drop";
-GLfloat				aspectRatio;
-/* -1 jelentése, hogy nem vonszolunk semmit. */
-/* -1 means we are not dragging. */
-GLint				dragged = -1;
-/* Vektor a szakasz végpontjainak tárolásához. */
-/* Vector for storing end points of a line. */
-static vector<vec2>	verticesData = {
-	vec2(-0.5f, -0.5f),
-	vec2( 0.5f,  0.5f),
-};
-
-void initShaderProgram() {
-	ShaderInfo shader_info[ProgramCount][3] = { {
-		{ GL_VERTEX_SHADER,		"./vertexShader.glsl" },
-		{ GL_FRAGMENT_SHADER,	"./fragmentShader.glsl" },
-		{ GL_NONE, nullptr } } };
+	// Sugárvektor iránya
+	vec3 dir = vec3(farPoint - nearPoint);
+	
+	// Keresünk egy metszéspontot a Z = 0 síkkal (mivel a vonalunk a Z=0 síkon fekszik)
+	if (abs(dir.z) > 0.0001f) {
+		float t = -nearPoint.z / dir.z;
+		vec3 worldPos = vec3(nearPoint) + t * dir;
+		return vec2(worldPos.x, worldPos.y);
+	}
+	
+	return vec2(nearPoint.x, nearPoint.y);
+}
 
 	for (int programItem = 0; programItem < ProgramCount; programItem++) {
 		program[programItem] = LoadShaders(shader_info[programItem]);
